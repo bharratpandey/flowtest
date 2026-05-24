@@ -39,15 +39,25 @@ function buildCssSelector(el) {
   if (el.id) return "#" + CSS.escape(el.id);
   if (el.dataset.testid) return '[data-testid="' + el.dataset.testid + '"]';
   if (el.dataset.cy) return '[data-cy="' + el.dataset.cy + '"]';
-  if (el.name && ["input", "select", "textarea"].includes(el.tagName.toLowerCase()))
+  if (
+    el.name &&
+    ["input", "select", "textarea"].includes(el.tagName.toLowerCase())
+  )
     return el.tagName.toLowerCase() + '[name="' + el.name + '"]';
   const parts = [];
   let node = el;
   while (node && node !== document.body) {
     let selector = node.tagName.toLowerCase();
-    if (node.id) { selector = "#" + CSS.escape(node.id); parts.unshift(selector); break; }
-    const siblings = [...(node.parentElement?.children || [])].filter(c => c.tagName === node.tagName);
-    if (siblings.length > 1) selector += ":nth-of-type(" + (siblings.indexOf(node) + 1) + ")";
+    if (node.id) {
+      selector = "#" + CSS.escape(node.id);
+      parts.unshift(selector);
+      break;
+    }
+    const siblings = [...(node.parentElement?.children || [])].filter(
+      (c) => c.tagName === node.tagName,
+    );
+    if (siblings.length > 1)
+      selector += ":nth-of-type(" + (siblings.indexOf(node) + 1) + ")";
     parts.unshift(selector);
     node = node.parentElement;
   }
@@ -61,7 +71,11 @@ function buildXPath(el) {
   while (node && node.nodeType === Node.ELEMENT_NODE) {
     let idx = 1;
     let sib = node.previousSibling;
-    while (sib) { if (sib.nodeType === Node.ELEMENT_NODE && sib.tagName === node.tagName) idx++; sib = sib.previousSibling; }
+    while (sib) {
+      if (sib.nodeType === Node.ELEMENT_NODE && sib.tagName === node.tagName)
+        idx++;
+      sib = sib.previousSibling;
+    }
     parts.unshift(node.tagName.toLowerCase() + "[" + idx + "]");
     node = node.parentNode;
   }
@@ -70,11 +84,20 @@ function buildXPath(el) {
 
 function buildRobustXPath(el) {
   const tag = el.tagName.toLowerCase();
-  if (el.getAttribute("aria-label")) return "//" + tag + '[@aria-label="' + el.getAttribute("aria-label") + '"]';
-  if (el.type && el.name) return "//" + tag + '[@type="' + el.type + '" and @name="' + el.name + '"]';
+  if (el.getAttribute("aria-label"))
+    return "//" + tag + '[@aria-label="' + el.getAttribute("aria-label") + '"]';
+  if (el.type && el.name)
+    return "//" + tag + '[@type="' + el.type + '" and @name="' + el.name + '"]';
   if (el.textContent?.trim() && ["button", "a", "label"].includes(tag))
-    return "//" + tag + '[contains(text(),"' + el.textContent.trim().slice(0, 50) + '")]';
-  if (el.placeholder) return "//" + tag + '[@placeholder="' + el.placeholder + '"]';
+    return (
+      "//" +
+      tag +
+      '[contains(text(),"' +
+      el.textContent.trim().slice(0, 50) +
+      '")]'
+    );
+  if (el.placeholder)
+    return "//" + tag + '[@placeholder="' + el.placeholder + '"]';
   return buildXPath(el);
 }
 
@@ -105,7 +128,12 @@ function recordStep(type, el, extra = {}) {
 
 function handleClick(e) {
   const el = e.target;
-  if (["INPUT", "TEXTAREA"].includes(el.tagName) && el.type !== "submit" && el.type !== "button") return;
+  if (
+    ["INPUT", "TEXTAREA"].includes(el.tagName) &&
+    el.type !== "submit" &&
+    el.type !== "button"
+  )
+    return;
   recordStep(e.detail === 2 ? "dblclick" : "click", el);
 }
 
@@ -114,7 +142,12 @@ function handleInput(e) {
   clearTimeout(el._debounceTimer);
   el._debounceTimer = setTimeout(() => {
     const isPassword = el.type === "password";
-    recordStep("type", el, { value: isPassword ? "__SECRET__" : el.value });
+    if (isPassword && el.value.length > 0) {
+      recordStep("type", el, { value: "__SECRET__" });
+      showSecretPrompt(el, el.value);
+    } else {
+      recordStep("type", el, { value: el.value });
+    }
   }, 600);
 }
 
@@ -147,42 +180,68 @@ let dragState = { isDragging: false, sourceSelector: null };
 let mouseDownPos = { x: 0, y: 0 };
 let potentialDragEl = null;
 
-document.addEventListener("dragstart", (e) => {
-  dragState.isDragging = true;
-  dragState.sourceSelector = buildTarget(e.target);
-}, true);
-
-document.addEventListener("drop", (e) => {
-  if (!dragState.isDragging) return;
-  recordStep("drag_and_drop", null, { source: dragState.sourceSelector, target: buildTarget(e.target) });
-  dragState.isDragging = false;
-}, true);
-
-document.addEventListener("mousedown", (e) => {
-  mouseDownPos = { x: e.clientX, y: e.clientY };
-  potentialDragEl = e.target;
-}, true);
-
-document.addEventListener("mousemove", (e) => {
-  if (!potentialDragEl) return;
-  const dx = Math.abs(e.clientX - mouseDownPos.x);
-  const dy = Math.abs(e.clientY - mouseDownPos.y);
-  if ((dx > 8 || dy > 8) && !dragState.isDragging) {
+document.addEventListener(
+  "dragstart",
+  (e) => {
     dragState.isDragging = true;
-    dragState.sourceSelector = buildTarget(potentialDragEl);
-  }
-}, true);
+    dragState.sourceSelector = buildTarget(e.target);
+  },
+  true,
+);
 
-document.addEventListener("mouseup", (e) => {
-  if (dragState.isDragging) {
-    const target = document.elementFromPoint(e.clientX, e.clientY);
-    if (target && target !== potentialDragEl) {
-      recordStep("drag_and_drop", null, { source: dragState.sourceSelector, target: buildTarget(target) });
+document.addEventListener(
+  "drop",
+  (e) => {
+    if (!dragState.isDragging) return;
+    recordStep("drag_and_drop", null, {
+      source: dragState.sourceSelector,
+      target: buildTarget(e.target),
+    });
+    dragState.isDragging = false;
+  },
+  true,
+);
+
+document.addEventListener(
+  "mousedown",
+  (e) => {
+    mouseDownPos = { x: e.clientX, y: e.clientY };
+    potentialDragEl = e.target;
+  },
+  true,
+);
+
+document.addEventListener(
+  "mousemove",
+  (e) => {
+    if (!potentialDragEl) return;
+    const dx = Math.abs(e.clientX - mouseDownPos.x);
+    const dy = Math.abs(e.clientY - mouseDownPos.y);
+    if ((dx > 8 || dy > 8) && !dragState.isDragging) {
+      dragState.isDragging = true;
+      dragState.sourceSelector = buildTarget(potentialDragEl);
     }
-  }
-  dragState.isDragging = false;
-  potentialDragEl = null;
-}, true);
+  },
+  true,
+);
+
+document.addEventListener(
+  "mouseup",
+  (e) => {
+    if (dragState.isDragging) {
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      if (target && target !== potentialDragEl) {
+        recordStep("drag_and_drop", null, {
+          source: dragState.sourceSelector,
+          target: buildTarget(target),
+        });
+      }
+    }
+    dragState.isDragging = false;
+    potentialDragEl = null;
+  },
+  true,
+);
 
 // ─── Attach / Detach ──────────────────────────────────────────────────────────
 
@@ -218,7 +277,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     sendResponse({ ok: true, steps: SESSION.steps });
   }
   if (msg.type === "GET_STATUS") {
-    sendResponse({ isRecording: SESSION.isRecording, stepCount: SESSION.steps.length });
+    sendResponse({
+      isRecording: SESSION.isRecording,
+      stepCount: SESSION.steps.length,
+    });
   }
   return true;
 });
@@ -236,3 +298,115 @@ chrome.storage.local.get(["isRecording", "workflowId"], (data) => {
     console.log("TraceDeck: Auto-started recording on tab:", location.href);
   }
 });
+
+// ─── Password Secret Prompt ───────────────────────────────────────────────────
+
+function showSecretPrompt(el, value) {
+  // Remove any existing prompt
+  const existing = document.getElementById("tracedeck-secret-prompt");
+  if (existing) existing.remove();
+
+  const rect = el.getBoundingClientRect();
+
+  const overlay = document.createElement("div");
+  overlay.id = "tracedeck-secret-prompt";
+  overlay.style.cssText = `
+    position: fixed;
+    top: ${Math.min(rect.bottom + 8, window.innerHeight - 160)}px;
+    left: ${Math.max(rect.left, 8)}px;
+    z-index: 2147483647;
+    background: #1a1a2e;
+    border: 1px solid #4a4a8a;
+    border-radius: 10px;
+    padding: 12px 16px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    font-family: system-ui, sans-serif;
+    min-width: 280px;
+    max-width: 320px;
+  `;
+
+  overlay.innerHTML = `
+    <div style="color:#a0a0d0;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+      <span>🔒</span>
+      <span>TraceDeck detected a password</span>
+    </div>
+    <div style="color:#e0e0ff;font-size:12px;margin-bottom:8px;">Save as secret?</div>
+    <input
+      id="tracedeck-secret-name"
+      type="text"
+      placeholder="e.g. EMB_PASSWORD"
+      style="
+        width: 100%;
+        background: #0d0d1a;
+        border: 1px solid #4a4a8a;
+        border-radius: 6px;
+        color: #e0e0ff;
+        font-size: 12px;
+        font-family: monospace;
+        padding: 6px 8px;
+        box-sizing: border-box;
+        margin-bottom: 8px;
+        outline: none;
+      "
+    />
+    <div style="display:flex;gap:6px;">
+      <button id="tracedeck-secret-skip" style="
+        flex:1;background:transparent;border:1px solid #4a4a8a;
+        color:#a0a0d0;border-radius:6px;padding:5px;
+        font-size:11px;cursor:pointer;
+      ">Skip</button>
+      <button id="tracedeck-secret-save" style="
+        flex:2;background:#5050c0;border:none;
+        color:#fff;border-radius:6px;padding:5px;
+        font-size:11px;cursor:pointer;font-weight:600;
+      ">Save & Continue</button>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const input = overlay.querySelector("#tracedeck-secret-name");
+  input.focus();
+
+  // Auto-suggest name based on field
+  const fieldName = el.name || el.id || el.placeholder || "";
+  if (fieldName) {
+    const suggested =
+      fieldName.toUpperCase().replace(/[^A-Z0-9]/g, "_") + "_PASSWORD";
+    input.value = suggested;
+  }
+
+  function saveSecret() {
+    const secretName = input.value.trim().toUpperCase().replace(/\s+/g, "_");
+    if (secretName) {
+      // Update the last recorded step to use named secret
+      chrome.runtime.sendMessage({
+        type: "UPDATE_LAST_SECRET",
+        secretName,
+        secretValue: value,
+      });
+    }
+    overlay.remove();
+  }
+
+  function skipSecret() {
+    overlay.remove();
+  }
+
+  overlay
+    .querySelector("#tracedeck-secret-save")
+    .addEventListener("click", saveSecret);
+  overlay
+    .querySelector("#tracedeck-secret-skip")
+    .addEventListener("click", skipSecret);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") saveSecret();
+    if (e.key === "Escape") skipSecret();
+    e.stopPropagation();
+  });
+
+  // Auto-dismiss after 15 seconds
+  setTimeout(() => {
+    if (overlay.parentNode) overlay.remove();
+  }, 15000);
+}

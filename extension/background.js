@@ -24,13 +24,15 @@ async function flushSteps() {
 
 function forwardStepUpdate(step) {
   chrome.tabs.query({ url: "http://localhost:3000/*" }, (tabs) => {
-    tabs.forEach(tab => {
-      chrome.tabs.sendMessage(tab.id, {
-        type: "STEP_UPDATE",
-        steps: [...stepBuffer],
-        lastStep: step,
-        stepCount: stepBuffer.length,
-      }).catch(() => {});
+    tabs.forEach((tab) => {
+      chrome.tabs
+        .sendMessage(tab.id, {
+          type: "STEP_UPDATE",
+          steps: [...stepBuffer],
+          lastStep: step,
+          stepCount: stepBuffer.length,
+        })
+        .catch(() => {});
     });
   });
 }
@@ -67,7 +69,10 @@ async function openRecordingSession(workflowId, sessionMode) {
     // Profile mode — record in existing browser
     // Just activate the current window and start recording
     recordingWindowId = null;
-    const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [currentTab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
     if (currentTab?.windowId) {
       await chrome.windows.update(currentTab.windowId, { focused: true });
     }
@@ -81,11 +86,14 @@ async function stopRecordingSession(steps) {
   const finalSteps = steps?.length > 0 ? steps : stepBuffer;
 
   if (activeWorkflowId) {
-    await fetch(API_BASE + "/workflows/" + activeWorkflowId + "/stop-recording", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ steps: finalSteps }),
-    }).catch(console.error);
+    await fetch(
+      API_BASE + "/workflows/" + activeWorkflowId + "/stop-recording",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ steps: finalSteps }),
+      },
+    ).catch(console.error);
   }
 
   // Close recording window if it was a fresh session
@@ -109,18 +117,17 @@ async function stopRecordingSession(steps) {
 // ─── Message handler ──────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-
   if (msg.type === "OPEN_RECORDING_SESSION") {
     openRecordingSession(msg.workflowId, msg.sessionMode)
-      .then(result => sendResponse(result))
-      .catch(err => sendResponse({ ok: false, error: err.message }));
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
   }
 
   if (msg.type === "STOP_RECORDING_SESSION") {
     stopRecordingSession(msg.steps)
       .then(() => sendResponse({ ok: true }))
-      .catch(err => sendResponse({ ok: false, error: err.message }));
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
   }
 
@@ -158,10 +165,27 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ steps: finalSteps }),
-    }).then(() => {
-      activeWorkflowId = null;
-      stepBuffer = [];
-    }).catch(console.error);
+    })
+      .then(() => {
+        activeWorkflowId = null;
+        stepBuffer = [];
+      })
+      .catch(console.error);
+    sendResponse({ ok: true });
+  }
+
+  if (msg.type === "UPDATE_LAST_SECRET") {
+    for (let i = stepBuffer.length - 1; i >= 0; i--) {
+      if (stepBuffer[i].value === "__SECRET__") {
+        stepBuffer[i] = {
+          ...stepBuffer[i],
+          value: "__SECRET__:" + msg.secretName,
+          secretName: msg.secretName,
+        };
+        console.log("Secret named:", msg.secretName);
+        break;
+      }
+    }
     sendResponse({ ok: true });
   }
 
@@ -172,7 +196,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       recordingWindowId,
     });
   }
-
 });
 
 // ─── Tab navigation tracking ──────────────────────────────────────────────────
@@ -180,7 +203,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!activeWorkflowId) return;
   if (changeInfo.status !== "complete") return;
-  if (!tab.url || tab.url.startsWith("chrome://") || tab.url === "about:blank") return;
+  if (!tab.url || tab.url.startsWith("chrome://") || tab.url === "about:blank")
+    return;
   if (tab.url.startsWith("http://localhost:3000")) return;
 
   // For fresh session — only track the recording window
@@ -191,7 +215,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
   if (timeSinceClick < 1500 && lastClickStep[tabId]) {
     const clickStep = lastClickStep[tabId];
-    const idx = stepBuffer.findIndex(s => s === clickStep);
+    const idx = stepBuffer.findIndex((s) => s === clickStep);
     if (idx !== -1) {
       stepBuffer[idx] = {
         ...clickStep,
