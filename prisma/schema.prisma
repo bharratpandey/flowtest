@@ -1,0 +1,229 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Users ───────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  avatarUrl     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  workflows     Workflow[]
+  healthChecks  HealthCheck[]
+}
+
+// ─── Workflows ────────────────────────────────────────────────────────────────
+
+model Workflow {
+  id            String    @id @default(cuid())
+  userId        String
+  title         String
+  description   String?
+  sessionType   String    @default("fresh") // fresh | profile
+  framework     String    @default("playwright-js") // playwright-js | playwright-py | selenium-java | selenium-py | cypress-js
+  status        String    @default("active") // active | archived
+  tags          String[]
+  startUrl      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  steps         Step[]
+  runs          Run[]
+  schedules     Schedule[]
+  stakeholders  Stakeholder[]
+  versions      WorkflowVersion[]
+  logs          Log[]
+}
+
+// ─── Workflow Versions ────────────────────────────────────────────────────────
+
+model WorkflowVersion {
+  id            String    @id @default(cuid())
+  workflowId    String
+  versionNumber Int
+  title         String
+  stepsSnapshot Json      // full snapshot of steps at this version
+  createdAt     DateTime  @default(now())
+
+  workflow      Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+}
+
+// ─── Steps ────────────────────────────────────────────────────────────────────
+
+model Step {
+  id            String    @id @default(cuid())
+  workflowId    String
+  sequence      Int
+  type          String    // click | dblclick | type | select | navigate | scroll | hover | keypress | drag_and_drop | new_tab | switch_tab | close_tab
+  url           String?
+  pageTitle     String?
+  tabId         Int?
+  tabIndex      Int?
+  target        Json?     // { css_selector, xpath, xpath_robust, aria_label, id, data_testid, text_content, tag, bounding_box, confidence }
+  value         String?
+  key           String?
+  scrollX       Int?
+  scrollY       Int?
+  screenshotUrl String?
+  assertion     Json?     // { type: visible|text|value, expected: string }
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  workflow      Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  runResults    RunStepResult[]
+}
+
+// ─── Runs ─────────────────────────────────────────────────────────────────────
+
+model Run {
+  id            String    @id @default(cuid())
+  workflowId    String
+  status        String    @default("queued") // queued | running | paused | completed | failed | cancelled
+  triggeredBy   String    @default("manual") // manual | cron
+  totalSteps    Int       @default(0)
+  passedSteps   Int       @default(0)
+  failedSteps   Int       @default(0)
+  durationMs    Int?
+  traceUrl      String?
+  errorMessage  String?
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
+
+  workflow      Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  stepResults   RunStepResult[]
+  apiCalls      ApiCall[]
+  logs          Log[]
+}
+
+// ─── Run Step Results ─────────────────────────────────────────────────────────
+
+model RunStepResult {
+  id              String    @id @default(cuid())
+  runId           String
+  stepId          String
+  sequence        Int
+  status          String    // passed | failed | skipped | healed
+  durationMs      Int?
+  screenshotUrl   String?
+  errorMessage    String?
+  healedFrom      String?   // original selector
+  healedTo        String?   // new selector
+  healMethod      String?   // how it was healed
+  healConfidence  String?   // high | medium | low
+  createdAt       DateTime  @default(now())
+
+  run             Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  step            Step      @relation(fields: [stepId], references: [id], onDelete: Cascade)
+}
+
+// ─── API Calls (captured during runs) ────────────────────────────────────────
+
+model ApiCall {
+  id              String    @id @default(cuid())
+  runId           String
+  stepSequence    Int?
+  url             String
+  method          String
+  statusCode      Int?
+  responseTimeMs  Int?
+  requestBody     Json?
+  responseBody    Json?
+  requestHeaders  Json?
+  isError         Boolean   @default(false)
+  timestamp       DateTime  @default(now())
+
+  run             Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
+
+// ─── Health Checks (standalone API monitoring) ───────────────────────────────
+
+model HealthCheck {
+  id              String    @id @default(cuid())
+  userId          String
+  name            String
+  url             String
+  method          String    @default("GET")
+  headers         Json?
+  expectedStatus  Int       @default(200)
+  expectedBody    String?
+  timeoutMs       Int       @default(5000)
+  intervalMinutes Int       @default(5)
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  results         HealthCheckResult[]
+}
+
+model HealthCheckResult {
+  id              String    @id @default(cuid())
+  healthCheckId   String
+  statusCode      Int?
+  responseTimeMs  Int?
+  isSuccess       Boolean
+  errorMessage    String?
+  checkedAt       DateTime  @default(now())
+
+  healthCheck     HealthCheck @relation(fields: [healthCheckId], references: [id], onDelete: Cascade)
+}
+
+// ─── Schedules (cron jobs) ────────────────────────────────────────────────────
+
+model Schedule {
+  id            String    @id @default(cuid())
+  workflowId    String
+  cronExpression String
+  timezone      String    @default("Asia/Kolkata")
+  isActive      Boolean   @default(true)
+  quietMode     Boolean   @default(true)
+  lastRunAt     DateTime?
+  nextRunAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  workflow      Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+}
+
+// ─── Stakeholders ─────────────────────────────────────────────────────────────
+
+model Stakeholder {
+  id              String    @id @default(cuid())
+  workflowId      String
+  name            String
+  email           String?
+  slackWebhook    String?
+  teamsWebhook    String?
+  customWebhook   String?
+  notifyOnPass    Boolean   @default(false)
+  notifyOnFail    Boolean   @default(true)
+  notifyOnHeal    Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+
+  workflow        Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+}
+
+// ─── Logs (audit trail) ───────────────────────────────────────────────────────
+
+model Log {
+  id            String    @id @default(cuid())
+  workflowId    String
+  runId         String?
+  type          String    // run_started | run_completed | run_failed | step_passed | step_failed | selector_healed_auto | selector_healed_manual | value_edited | step_reordered | step_deleted | step_inserted | step_rerecorded | cron_triggered | report_sent
+  actor         String    @default("system") // system | user
+  stepSequence  Int?
+  detail        Json?
+  createdAt     DateTime  @default(now())
+
+  workflow      Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  run           Run?      @relation(fields: [runId], references: [id], onDelete: SetNull)
+}
