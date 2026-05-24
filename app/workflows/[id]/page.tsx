@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
+import RecordButton from "./RecordButton";
 
 export default async function WorkflowPage({
   params,
@@ -48,14 +49,11 @@ export default async function WorkflowPage({
               </p>
             )}
           </div>
-          <div className="flex gap-3">
-            <button className="border px-4 py-2 rounded-lg text-sm font-medium hover:bg-muted transition-colors">
-              Run workflow
-            </button>
-            <button className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">
-              Start recording
-            </button>
-          </div>
+          <RecordButton
+            workflowId={workflow.id}
+            workflowTitle={workflow.title}
+            workflowFramework={workflow.framework}
+          />
         </div>
 
         {workflow.steps.length === 0 ? (
@@ -65,9 +63,6 @@ export default async function WorkflowPage({
               Install the Chrome extension and click Start recording to capture
               your workflow
             </p>
-            <button className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">
-              Start recording
-            </button>
           </div>
         ) : (
           <div className="space-y-3">
@@ -101,9 +96,7 @@ export default async function WorkflowPage({
                   {step.value && (
                     <p className="text-sm mt-1">
                       <span className="text-muted-foreground">Value: </span>
-                      {step.type === "type" && step.value === "__SECRET__"
-                        ? "••••••••"
-                        : step.value}
+                      {step.value === "__SECRET__" ? "••••••••" : step.value}
                     </p>
                   )}
                 </div>

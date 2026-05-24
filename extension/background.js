@@ -1,17 +1,13 @@
 // background.js - Service worker
-// Manages workflow lifecycle and sends steps to TraceDeck API
 
 const API_BASE = "http://localhost:3000/api";
 let activeWorkflowId = null;
 let stepBuffer = [];
 let flushTimer = null;
 
-// ─── Flush steps to API ───────────────────────────────────────────────────────
-
 async function flushSteps() {
   if (!activeWorkflowId || stepBuffer.length === 0) return;
   const steps = [...stepBuffer];
-  stepBuffer = [];
   try {
     await fetch(API_BASE + "/workflows/" + activeWorkflowId + "/steps", {
       method: "POST",
@@ -23,65 +19,71 @@ async function flushSteps() {
   }
 }
 
-// ─── Message Handler ──────────────────────────────────────────────────────────
-
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "START_WORKFLOW") {
+    activeWorkflowId = msg.workflowId;
+    stepBuffer = [];
     fetch(API_BASE + "/workflows/" + msg.workflowId + "/start-recording", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        activeWorkflowId = msg.workflowId;
-        sendResponse({ ok: true });
-      })
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
-    return true;
+    }).catch(console.error);
+    sendResponse({ ok: true });
   }
 
   if (msg.type === "STEP_RECORDED") {
     if (!activeWorkflowId) return;
     stepBuffer.push(msg.step);
+    chrome.tabs.query({ url: "http://localhost:3000/*" }, (tabs) => {
+      tabs.forEach((tab) => {
+        chrome.tabs
+          .sendMessage(tab.id, {
+            type: "STEP_UPDATE",
+            steps: [...stepBuffer],
+            lastStep: msg.step,
+            stepCount: stepBuffer.length,
+          })
+          .catch(() => {});
+      });
+    });
     clearTimeout(flushTimer);
-    flushTimer = setTimeout(flushSteps, 1000);
+    flushTimer = setTimeout(flushSteps, 2000);
   }
 
   if (msg.type === "STOP_WORKFLOW") {
-    flushSteps().then(() => {
-      fetch(API_BASE + "/workflows/" + activeWorkflowId + "/stop-recording", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ steps: msg.steps }),
+    clearTimeout(flushTimer);
+    const finalSteps = msg.steps?.length > 0 ? msg.steps : stepBuffer;
+    fetch(API_BASE + "/workflows/" + activeWorkflowId + "/stop-recording", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ steps: finalSteps }),
+    })
+      .then(() => {
+        activeWorkflowId = null;
+        stepBuffer = [];
       })
-        .then((r) => r.json())
-        .then(() => {
-          activeWorkflowId = null;
-          sendResponse({ ok: true });
-        })
-        .catch((err) => sendResponse({ ok: false, error: err.message }));
-    });
-    return true;
+      .catch(console.error);
+    sendResponse({ ok: true });
   }
 
   if (msg.type === "GET_STATE") {
-    sendResponse({ activeWorkflowId });
+    sendResponse({ activeWorkflowId, stepCount: stepBuffer.length });
   }
 });
 
-// ─── Track tab navigation ─────────────────────────────────────────────────────
-
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!activeWorkflowId) return;
-  if (changeInfo.status === "complete" && tab.url) {
-    const step = {
-      sequence: Date.now(),
+  if (
+    changeInfo.status === "complete" &&
+    tab.url &&
+    !tab.url.startsWith("chrome://")
+  ) {
+    stepBuffer.push({
+      sequence: stepBuffer.length + 1,
       type: "navigate",
       url: tab.url,
       page_title: tab.title,
       timestamp_ms: Date.now(),
       target: null,
-    };
-    stepBuffer.push(step);
+    });
   }
 });
