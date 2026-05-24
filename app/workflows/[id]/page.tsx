@@ -3,13 +3,10 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import RecordButton from "./RecordButton";
+import RunButton from "./RunButton";
 import CodeViewer from "./CodeViewer";
 
-export default async function WorkflowPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function WorkflowPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
@@ -25,19 +22,10 @@ export default async function WorkflowPage({
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b px-6 py-4 flex items-center gap-4">
-        <a
-          href="/dashboard"
-          className="text-muted-foreground hover:text-foreground text-sm"
-        >
-          Back
-        </a>
+        <a href="/dashboard" className="text-muted-foreground hover:text-foreground text-sm">Back</a>
         <span className="font-semibold">{workflow.title}</span>
-        <span className="text-xs bg-muted px-2 py-1 rounded-md">
-          {workflow.framework}
-        </span>
-        <span className="text-xs bg-muted px-2 py-1 rounded-md">
-          {workflow.sessionType}
-        </span>
+        <span className="text-xs bg-muted px-2 py-1 rounded-md">{workflow.framework}</span>
+        <span className="text-xs bg-muted px-2 py-1 rounded-md">{workflow.sessionType}</span>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
@@ -45,37 +33,28 @@ export default async function WorkflowPage({
           <div>
             <h1 className="text-2xl font-bold">{workflow.title}</h1>
             {workflow.description && (
-              <p className="text-muted-foreground mt-1">
-                {workflow.description}
-              </p>
+              <p className="text-muted-foreground mt-1">{workflow.description}</p>
             )}
           </div>
-          <RecordButton
-            workflowId={workflow.id}
-            workflowTitle={workflow.title}
-            workflowFramework={workflow.framework}
-          />
+          <div className="flex items-center gap-3">
+            <RunButton workflowId={workflow.id} hasSteps={workflow.steps.length > 0} />
+            <RecordButton workflowId={workflow.id} workflowTitle={workflow.title} workflowFramework={workflow.framework} />
+          </div>
         </div>
 
         {workflow.steps.length === 0 ? (
           <div className="border-2 border-dashed rounded-xl p-12 text-center">
             <h3 className="font-semibold mb-2">No steps recorded yet</h3>
             <p className="text-muted-foreground text-sm mb-4">
-              Install the Chrome extension and click Start recording to capture
-              your workflow
+              Install the Chrome extension and click Start recording to capture your workflow
             </p>
           </div>
         ) : (
           <>
             <div className="space-y-3">
-              <h2 className="font-semibold text-lg mb-4">
-                Steps ({workflow.steps.length})
-              </h2>
+              <h2 className="font-semibold text-lg mb-4">Steps ({workflow.steps.length})</h2>
               {workflow.steps.map((step) => (
-                <div
-                  key={step.id}
-                  className="border rounded-xl p-4 flex items-start gap-4"
-                >
+                <div key={step.id} className="border rounded-xl p-4 flex items-start gap-4">
                   <div className="w-8 h-8 bg-muted rounded-lg flex items-center justify-center text-sm font-medium flex-shrink-0">
                     {step.sequence}
                   </div>
@@ -85,15 +64,11 @@ export default async function WorkflowPage({
                         {step.type}
                       </span>
                       {step.pageTitle && (
-                        <span className="text-xs text-muted-foreground">
-                          {step.pageTitle}
-                        </span>
+                        <span className="text-xs text-muted-foreground">{step.pageTitle}</span>
                       )}
                     </div>
                     {step.url && (
-                      <p className="text-sm text-muted-foreground mt-1 truncate">
-                        {step.url}
-                      </p>
+                      <p className="text-sm text-muted-foreground mt-1 truncate">{step.url}</p>
                     )}
                     {step.value && (
                       <p className="text-sm mt-1">
@@ -105,11 +80,7 @@ export default async function WorkflowPage({
                 </div>
               ))}
             </div>
-
-            <CodeViewer
-              workflowId={workflow.id}
-              defaultFramework={workflow.framework}
-            />
+            <CodeViewer workflowId={workflow.id} defaultFramework={workflow.framework} />
           </>
         )}
       </main>

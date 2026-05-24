@@ -89,9 +89,6 @@ export default function RecordButton({
 
   return (
     <div className="flex gap-3">
-      <button className="border px-4 py-2 rounded-lg text-sm font-medium hover:bg-muted transition-colors">
-        Run workflow
-      </button>
       <button
         onClick={startRecording}
         className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
