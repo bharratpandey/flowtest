@@ -11,6 +11,8 @@ const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const { Pool } = require('pg');
 const { createClient } = require('@supabase/supabase-js');
+const fs = require('fs');
+const path = require('path');
 
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL.replace("https://", "rediss://");
 
@@ -29,20 +31,32 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-async function uploadScreenshot(buffer, runId, sequence) {
+async function uploadTrace(runId) {
   try {
-    const path = `${runId}/step-${sequence}.png`;
+    const tracePath = `/tmp/trace-${runId}.zip`;
+    if (!fs.existsSync(tracePath)) return null;
+
+    const buffer = fs.readFileSync(tracePath);
+    const storagePath = `traces/${runId}.zip`;
+
     const { error } = await supabase.storage
       .from('screenshots')
-      .upload(path, buffer, {
-        contentType: 'image/png',
+      .upload(storagePath, buffer, {
+        contentType: 'application/zip',
         upsert: true,
       });
+
     if (error) throw error;
-    const { data } = supabase.storage.from('screenshots').getPublicUrl(path);
+
+    const { data } = supabase.storage
+      .from('screenshots')
+      .getPublicUrl(storagePath);
+
+    fs.unlinkSync(tracePath);
+    console.log(`📦 Trace uploaded: ${storagePath}`);
     return data.publicUrl;
   } catch (err) {
-    console.error('Screenshot upload failed:', err.message);
+    console.error('Trace upload failed:', err.message);
     return null;
   }
 }
@@ -59,15 +73,19 @@ async function cleanupOldRuns(workflowId, keepCount = 3) {
 
     const toDelete = runs.slice(keepCount);
     for (const run of toDelete) {
-      // Delete screenshots from storage
       const { data: files } = await supabase.storage
         .from('screenshots')
-        .list(run.id);
-      if (files && files.length > 0) {
-        const paths = files.map(f => `${run.id}/${f.name}`);
-        await supabase.storage.from('screenshots').remove(paths);
+        .list(`traces`);
+
+      if (files) {
+        const traceFile = files.find(f => f.name === `${run.id}.zip`);
+        if (traceFile) {
+          await supabase.storage
+            .from('screenshots')
+            .remove([`traces/${run.id}.zip`]);
+        }
       }
-      // Delete run from DB
+
       await prisma.run.delete({ where: { id: run.id } });
       console.log(`🗑️ Cleaned up old run: ${run.id}`);
     }
@@ -104,6 +122,14 @@ const worker = new Worker(
       const context = await browser.newContext({
         viewport: { width: 1280, height: 720 },
       });
+
+      // Enable Playwright tracing
+      await context.tracing.start({
+        screenshots: true,
+        snapshots: true,
+        sources: false,
+      });
+
       const page = await context.newPage();
 
       let passedSteps = 0;
@@ -156,16 +182,6 @@ const worker = new Worker(
           console.log(`  ❌ Step ${step.sequence} failed: ${err.message}`);
         }
 
-        // Take screenshot after every step
-        let screenshotUrl = null;
-        try {
-          const buffer = await page.screenshot({ type: 'png', fullPage: false });
-          screenshotUrl = await uploadScreenshot(buffer, runId, step.sequence);
-          if (screenshotUrl) console.log(`  📸 Screenshot saved: step-${step.sequence}`);
-        } catch (e) {
-          console.error('  Screenshot error:', e.message);
-        }
-
         await prisma.runStepResult.create({
           data: {
             runId,
@@ -174,14 +190,19 @@ const worker = new Worker(
             status,
             durationMs: Date.now() - stepStart,
             errorMessage,
-            screenshotUrl,
           },
         });
 
         if (status === "failed") break;
       }
 
+      // Stop tracing and save
+      const tracePath = `/tmp/trace-${runId}.zip`;
+      await context.tracing.stop({ path: tracePath });
       await browser.close();
+
+      // Upload trace to Supabase
+      const traceUrl = await uploadTrace(runId);
 
       const finalStatus = failedSteps > 0 ? "failed" : "completed";
       await prisma.run.update({
@@ -192,12 +213,13 @@ const worker = new Worker(
           failedSteps,
           durationMs: Date.now() - startTime,
           completedAt: new Date(),
+          traceUrl,
         },
       });
 
       console.log(`✅ Run ${runId}: ${finalStatus} (${passedSteps}/${workflow.steps.length} steps)`);
+      if (traceUrl) console.log(`🔗 Trace: ${traceUrl}`);
 
-      // Cleanup old runs — keep last 3
       await cleanupOldRuns(workflowId, 3);
 
     } catch (err) {
