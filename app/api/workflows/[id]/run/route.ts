@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { workflowRunQueue } from "@/lib/queue";
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await auth();
@@ -13,6 +13,8 @@ export async function POST(
   }
 
   const { id } = await params;
+  const body = await req.json().catch(() => ({}));
+  const headed = body.headed === true;
 
   const workflow = await prisma.workflow.findFirst({
     where: { id, userId: session.user.id! },
@@ -30,7 +32,6 @@ export async function POST(
     );
   }
 
-  // Create a run record
   const run = await prisma.run.create({
     data: {
       workflowId: id,
@@ -40,25 +41,28 @@ export async function POST(
     },
   });
 
-  // Add job to queue
   await workflowRunQueue.add(
     "run-workflow",
     {
       runId: run.id,
       workflowId: id,
       userId: session.user.id!,
+      headed,
     },
     { jobId: run.id },
   );
 
-  // Log it
   await prisma.log.create({
     data: {
       workflowId: id,
       runId: run.id,
       type: "run_started",
       actor: "user",
-      detail: { message: "Run queued", totalSteps: workflow.steps.length },
+      detail: {
+        message: "Run queued",
+        totalSteps: workflow.steps.length,
+        headed,
+      },
     },
   });
 

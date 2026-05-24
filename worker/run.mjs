@@ -10,6 +10,7 @@ const IORedis = require('ioredis');
 const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const { Pool } = require('pg');
+const { createClient } = require('@supabase/supabase-js');
 
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL.replace("https://", "rediss://");
 
@@ -23,13 +24,65 @@ const pool = new Pool({ connectionString: process.env.DIRECT_URL });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+async function uploadScreenshot(buffer, runId, sequence) {
+  try {
+    const path = `${runId}/step-${sequence}.png`;
+    const { error } = await supabase.storage
+      .from('screenshots')
+      .upload(path, buffer, {
+        contentType: 'image/png',
+        upsert: true,
+      });
+    if (error) throw error;
+    const { data } = supabase.storage.from('screenshots').getPublicUrl(path);
+    return data.publicUrl;
+  } catch (err) {
+    console.error('Screenshot upload failed:', err.message);
+    return null;
+  }
+}
+
+async function cleanupOldRuns(workflowId, keepCount = 3) {
+  try {
+    const runs = await prisma.run.findMany({
+      where: { workflowId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+
+    if (runs.length <= keepCount) return;
+
+    const toDelete = runs.slice(keepCount);
+    for (const run of toDelete) {
+      // Delete screenshots from storage
+      const { data: files } = await supabase.storage
+        .from('screenshots')
+        .list(run.id);
+      if (files && files.length > 0) {
+        const paths = files.map(f => `${run.id}/${f.name}`);
+        await supabase.storage.from('screenshots').remove(paths);
+      }
+      // Delete run from DB
+      await prisma.run.delete({ where: { id: run.id } });
+      console.log(`🗑️ Cleaned up old run: ${run.id}`);
+    }
+  } catch (err) {
+    console.error('Cleanup error:', err.message);
+  }
+}
+
 console.log("🚀 TraceDeck Worker starting...");
 
 const worker = new Worker(
   "workflow-runs",
   async (job) => {
-    const { runId, workflowId } = job.data;
-    console.log(`📋 Processing run: ${runId}`);
+    const { runId, workflowId, headed } = job.data;
+    console.log(`📋 Processing run: ${runId} (headed: ${headed})`);
 
     const startTime = Date.now();
 
@@ -46,9 +99,8 @@ const worker = new Worker(
 
       if (!workflow) throw new Error("Workflow not found");
 
-      // Import playwright
       const { chromium } = require('playwright');
-      const browser = await chromium.launch({ headless: true });
+      const browser = await chromium.launch({ headless: !headed });
       const context = await browser.newContext({
         viewport: { width: 1280, height: 720 },
       });
@@ -104,6 +156,16 @@ const worker = new Worker(
           console.log(`  ❌ Step ${step.sequence} failed: ${err.message}`);
         }
 
+        // Take screenshot after every step
+        let screenshotUrl = null;
+        try {
+          const buffer = await page.screenshot({ type: 'png', fullPage: false });
+          screenshotUrl = await uploadScreenshot(buffer, runId, step.sequence);
+          if (screenshotUrl) console.log(`  📸 Screenshot saved: step-${step.sequence}`);
+        } catch (e) {
+          console.error('  Screenshot error:', e.message);
+        }
+
         await prisma.runStepResult.create({
           data: {
             runId,
@@ -112,6 +174,7 @@ const worker = new Worker(
             status,
             durationMs: Date.now() - stepStart,
             errorMessage,
+            screenshotUrl,
           },
         });
 
@@ -133,6 +196,9 @@ const worker = new Worker(
       });
 
       console.log(`✅ Run ${runId}: ${finalStatus} (${passedSteps}/${workflow.steps.length} steps)`);
+
+      // Cleanup old runs — keep last 3
+      await cleanupOldRuns(workflowId, 3);
 
     } catch (err) {
       console.error(`❌ Run ${runId} error:`, err.message);

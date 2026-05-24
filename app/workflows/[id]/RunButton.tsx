@@ -12,17 +12,21 @@ export default function RunButton({ workflowId, hasSteps }: Props) {
   const router = useRouter();
   const [status, setStatus] = useState("idle");
   const [runId, setRunId] = useState<string | null>(null);
+  const [showOptions, setShowOptions] = useState(false);
 
-  async function startRun() {
+  async function startRun(headed: boolean) {
     if (!hasSteps) {
       alert("Record some steps first before running.");
       return;
     }
 
+    setShowOptions(false);
     setStatus("queuing");
 
     const res = await fetch("/api/workflows/" + workflowId + "/run", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ headed }),
     });
 
     const data = await res.json();
@@ -66,7 +70,7 @@ export default function RunButton({ workflowId, hasSteps }: Props) {
         <span className="text-sm font-medium">Running...</span>
         {runId && (
           <a href={"/runs/" + runId} className="text-xs text-primary underline">
-            View live
+            View results
           </a>
         )}
       </div>
@@ -74,11 +78,42 @@ export default function RunButton({ workflowId, hasSteps }: Props) {
   }
 
   return (
-    <button
-      onClick={startRun}
-      className="border px-4 py-2 rounded-lg text-sm font-medium hover:bg-muted transition-colors"
-    >
-      Run workflow
-    </button>
+    <div className="relative">
+      <div className="flex border rounded-lg overflow-hidden">
+        <button
+          onClick={() => startRun(false)}
+          className="px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
+        >
+          Run workflow
+        </button>
+        <button
+          onClick={() => setShowOptions(!showOptions)}
+          className="px-2 py-2 text-sm border-l hover:bg-muted transition-colors"
+          title="More options"
+        >
+          ▾
+        </button>
+      </div>
+
+      {showOptions && (
+        <div className="absolute top-full mt-1 right-0 bg-background border rounded-lg shadow-lg z-10 min-w-48">
+          <button
+            onClick={() => startRun(false)}
+            className="w-full text-left px-4 py-3 text-sm hover:bg-muted transition-colors"
+          >
+            <div className="font-medium">Run headless</div>
+            <div className="text-xs text-muted-foreground mt-0.5">Background — faster</div>
+          </button>
+          <div className="border-t"></div>
+          <button
+            onClick={() => startRun(true)}
+            className="w-full text-left px-4 py-3 text-sm hover:bg-muted transition-colors"
+          >
+            <div className="font-medium">Watch live</div>
+            <div className="text-xs text-muted-foreground mt-0.5">Opens browser window — see every step</div>
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
