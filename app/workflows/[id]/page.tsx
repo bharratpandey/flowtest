@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import RecordButton from "./RecordButton";
+import CodeViewer from "./CodeViewer";
 
 export default async function WorkflowPage({
   params,
@@ -65,44 +66,51 @@ export default async function WorkflowPage({
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
-            <h2 className="font-semibold text-lg mb-4">
-              Steps ({workflow.steps.length})
-            </h2>
-            {workflow.steps.map((step) => (
-              <div
-                key={step.id}
-                className="border rounded-xl p-4 flex items-start gap-4"
-              >
-                <div className="w-8 h-8 bg-muted rounded-lg flex items-center justify-center text-sm font-medium flex-shrink-0">
-                  {step.sequence}
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded font-medium">
-                      {step.type}
-                    </span>
-                    {step.pageTitle && (
-                      <span className="text-xs text-muted-foreground">
-                        {step.pageTitle}
+          <>
+            <div className="space-y-3">
+              <h2 className="font-semibold text-lg mb-4">
+                Steps ({workflow.steps.length})
+              </h2>
+              {workflow.steps.map((step) => (
+                <div
+                  key={step.id}
+                  className="border rounded-xl p-4 flex items-start gap-4"
+                >
+                  <div className="w-8 h-8 bg-muted rounded-lg flex items-center justify-center text-sm font-medium flex-shrink-0">
+                    {step.sequence}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded font-medium">
+                        {step.type}
                       </span>
+                      {step.pageTitle && (
+                        <span className="text-xs text-muted-foreground">
+                          {step.pageTitle}
+                        </span>
+                      )}
+                    </div>
+                    {step.url && (
+                      <p className="text-sm text-muted-foreground mt-1 truncate">
+                        {step.url}
+                      </p>
+                    )}
+                    {step.value && (
+                      <p className="text-sm mt-1">
+                        <span className="text-muted-foreground">Value: </span>
+                        {step.value === "__SECRET__" ? "••••••••" : step.value}
+                      </p>
                     )}
                   </div>
-                  {step.url && (
-                    <p className="text-sm text-muted-foreground mt-1 truncate">
-                      {step.url}
-                    </p>
-                  )}
-                  {step.value && (
-                    <p className="text-sm mt-1">
-                      <span className="text-muted-foreground">Value: </span>
-                      {step.value === "__SECRET__" ? "••••••••" : step.value}
-                    </p>
-                  )}
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+
+            <CodeViewer
+              workflowId={workflow.id}
+              defaultFramework={workflow.framework}
+            />
+          </>
         )}
       </main>
     </div>
