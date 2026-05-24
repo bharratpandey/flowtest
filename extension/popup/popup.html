@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TraceDeck</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        width: 320px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #ffffff;
+        color: #0f0f0f;
+      }
+      .header {
+        padding: 16px;
+        border-bottom: 1px solid #e5e5e5;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .logo {
+        width: 28px;
+        height: 28px;
+        background: #0f0f0f;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: 700;
+        font-size: 13px;
+      }
+      .logo-text {
+        font-weight: 600;
+        font-size: 15px;
+      }
+      .body {
+        padding: 16px;
+      }
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+        margin-bottom: 16px;
+      }
+      .status-badge.idle {
+        background: #f3f4f6;
+        color: #6b7280;
+      }
+      .status-badge.recording {
+        background: #fef2f2;
+        color: #ef4444;
+      }
+      .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .status-badge.recording .status-dot {
+        animation: pulse 1s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+      .workflow-info {
+        background: #f9fafb;
+        border: 1px solid #e5e5e5;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 16px;
+        font-size: 13px;
+      }
+      .workflow-name {
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .workflow-meta {
+        color: #6b7280;
+        font-size: 12px;
+      }
+      .step-count {
+        background: #f9fafb;
+        border: 1px solid #e5e5e5;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 16px;
+        text-align: center;
+      }
+      .step-count .number {
+        font-size: 28px;
+        font-weight: 700;
+      }
+      .step-count .label {
+        font-size: 12px;
+        color: #6b7280;
+        margin-top: 2px;
+      }
+      .last-step {
+        background: #f9fafb;
+        border: 1px solid #e5e5e5;
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-bottom: 16px;
+        font-size: 12px;
+      }
+      .last-step .label {
+        color: #6b7280;
+        margin-bottom: 4px;
+      }
+      .last-step .value {
+        font-weight: 500;
+        truncate: ellipsis;
+      }
+      .btn {
+        width: 100%;
+        padding: 10px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        transition: opacity 0.15s;
+      }
+      .btn:hover {
+        opacity: 0.85;
+      }
+      .btn-primary {
+        background: #0f0f0f;
+        color: white;
+        margin-bottom: 8px;
+      }
+      .btn-danger {
+        background: #ef4444;
+        color: white;
+        margin-bottom: 8px;
+      }
+      .btn-secondary {
+        background: #f3f4f6;
+        color: #0f0f0f;
+        margin-bottom: 8px;
+      }
+      .btn-outline {
+        background: white;
+        color: #0f0f0f;
+        border: 1px solid #e5e5e5;
+      }
+      .no-workflow {
+        text-align: center;
+        padding: 16px 0;
+        color: #6b7280;
+        font-size: 13px;
+      }
+      .no-workflow a {
+        color: #0f0f0f;
+        font-weight: 600;
+        text-decoration: none;
+      }
+      #idle-view,
+      #recording-view {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="logo">T</div>
+      <span class="logo-text">TraceDeck</span>
+    </div>
+
+    <div class="body">
+      <!-- Idle view -->
+      <div id="idle-view">
+        <div class="status-badge idle">
+          <div class="status-dot"></div>
+          Not recording
+        </div>
+        <div id="no-workflow" class="no-workflow" style="display: none">
+          <p>Open TraceDeck to select a workflow</p>
+          <a href="http://localhost:3000/dashboard" target="_blank"
+            >Open TraceDeck →</a
+          >
+        </div>
+        <div id="workflow-ready" style="display: none">
+          <div class="workflow-info">
+            <div class="workflow-name" id="workflow-name"></div>
+            <div class="workflow-meta" id="workflow-meta"></div>
+          </div>
+          <button class="btn btn-primary" id="start-btn">
+            Start Recording
+          </button>
+          <button class="btn btn-outline" id="open-dashboard">
+            Open Dashboard
+          </button>
+        </div>
+      </div>
+
+      <!-- Recording view -->
+      <div id="recording-view">
+        <div class="status-badge recording">
+          <div class="status-dot"></div>
+          Recording...
+        </div>
+        <div class="step-count">
+          <div class="number" id="step-count">0</div>
+          <div class="label">steps captured</div>
+        </div>
+        <div class="last-step" id="last-step-container" style="display: none">
+          <div class="label">Last action</div>
+          <div class="value" id="last-step-text"></div>
+        </div>
+        <button class="btn btn-danger" id="stop-btn">Stop Recording</button>
+      </div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
