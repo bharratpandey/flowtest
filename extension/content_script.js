@@ -39,25 +39,15 @@ function buildCssSelector(el) {
   if (el.id) return "#" + CSS.escape(el.id);
   if (el.dataset.testid) return '[data-testid="' + el.dataset.testid + '"]';
   if (el.dataset.cy) return '[data-cy="' + el.dataset.cy + '"]';
-  if (
-    el.name &&
-    ["input", "select", "textarea"].includes(el.tagName.toLowerCase())
-  )
+  if (el.name && ["input", "select", "textarea"].includes(el.tagName.toLowerCase()))
     return el.tagName.toLowerCase() + '[name="' + el.name + '"]';
   const parts = [];
   let node = el;
   while (node && node !== document.body) {
     let selector = node.tagName.toLowerCase();
-    if (node.id) {
-      selector = "#" + CSS.escape(node.id);
-      parts.unshift(selector);
-      break;
-    }
-    const siblings = [...(node.parentElement?.children || [])].filter(
-      (c) => c.tagName === node.tagName,
-    );
-    if (siblings.length > 1)
-      selector += ":nth-of-type(" + (siblings.indexOf(node) + 1) + ")";
+    if (node.id) { selector = "#" + CSS.escape(node.id); parts.unshift(selector); break; }
+    const siblings = [...(node.parentElement?.children || [])].filter(c => c.tagName === node.tagName);
+    if (siblings.length > 1) selector += ":nth-of-type(" + (siblings.indexOf(node) + 1) + ")";
     parts.unshift(selector);
     node = node.parentElement;
   }
@@ -71,11 +61,7 @@ function buildXPath(el) {
   while (node && node.nodeType === Node.ELEMENT_NODE) {
     let idx = 1;
     let sib = node.previousSibling;
-    while (sib) {
-      if (sib.nodeType === Node.ELEMENT_NODE && sib.tagName === node.tagName)
-        idx++;
-      sib = sib.previousSibling;
-    }
+    while (sib) { if (sib.nodeType === Node.ELEMENT_NODE && sib.tagName === node.tagName) idx++; sib = sib.previousSibling; }
     parts.unshift(node.tagName.toLowerCase() + "[" + idx + "]");
     node = node.parentNode;
   }
@@ -84,20 +70,11 @@ function buildXPath(el) {
 
 function buildRobustXPath(el) {
   const tag = el.tagName.toLowerCase();
-  if (el.getAttribute("aria-label"))
-    return "//" + tag + '[@aria-label="' + el.getAttribute("aria-label") + '"]';
-  if (el.type && el.name)
-    return "//" + tag + '[@type="' + el.type + '" and @name="' + el.name + '"]';
+  if (el.getAttribute("aria-label")) return "//" + tag + '[@aria-label="' + el.getAttribute("aria-label") + '"]';
+  if (el.type && el.name) return "//" + tag + '[@type="' + el.type + '" and @name="' + el.name + '"]';
   if (el.textContent?.trim() && ["button", "a", "label"].includes(tag))
-    return (
-      "//" +
-      tag +
-      '[contains(text(),"' +
-      el.textContent.trim().slice(0, 50) +
-      '")]'
-    );
-  if (el.placeholder)
-    return "//" + tag + '[@placeholder="' + el.placeholder + '"]';
+    return "//" + tag + '[contains(text(),"' + el.textContent.trim().slice(0, 50) + '")]';
+  if (el.placeholder) return "//" + tag + '[@placeholder="' + el.placeholder + '"]';
   return buildXPath(el);
 }
 
@@ -128,12 +105,7 @@ function recordStep(type, el, extra = {}) {
 
 function handleClick(e) {
   const el = e.target;
-  if (
-    ["INPUT", "TEXTAREA"].includes(el.tagName) &&
-    el.type !== "submit" &&
-    el.type !== "button"
-  )
-    return;
+  if (["INPUT", "TEXTAREA"].includes(el.tagName) && el.type !== "submit" && el.type !== "button") return;
   recordStep(e.detail === 2 ? "dblclick" : "click", el);
 }
 
@@ -175,68 +147,42 @@ let dragState = { isDragging: false, sourceSelector: null };
 let mouseDownPos = { x: 0, y: 0 };
 let potentialDragEl = null;
 
-document.addEventListener(
-  "dragstart",
-  (e) => {
+document.addEventListener("dragstart", (e) => {
+  dragState.isDragging = true;
+  dragState.sourceSelector = buildTarget(e.target);
+}, true);
+
+document.addEventListener("drop", (e) => {
+  if (!dragState.isDragging) return;
+  recordStep("drag_and_drop", null, { source: dragState.sourceSelector, target: buildTarget(e.target) });
+  dragState.isDragging = false;
+}, true);
+
+document.addEventListener("mousedown", (e) => {
+  mouseDownPos = { x: e.clientX, y: e.clientY };
+  potentialDragEl = e.target;
+}, true);
+
+document.addEventListener("mousemove", (e) => {
+  if (!potentialDragEl) return;
+  const dx = Math.abs(e.clientX - mouseDownPos.x);
+  const dy = Math.abs(e.clientY - mouseDownPos.y);
+  if ((dx > 8 || dy > 8) && !dragState.isDragging) {
     dragState.isDragging = true;
-    dragState.sourceSelector = buildTarget(e.target);
-  },
-  true,
-);
+    dragState.sourceSelector = buildTarget(potentialDragEl);
+  }
+}, true);
 
-document.addEventListener(
-  "drop",
-  (e) => {
-    if (!dragState.isDragging) return;
-    recordStep("drag_and_drop", null, {
-      source: dragState.sourceSelector,
-      target: buildTarget(e.target),
-    });
-    dragState.isDragging = false;
-  },
-  true,
-);
-
-document.addEventListener(
-  "mousedown",
-  (e) => {
-    mouseDownPos = { x: e.clientX, y: e.clientY };
-    potentialDragEl = e.target;
-  },
-  true,
-);
-
-document.addEventListener(
-  "mousemove",
-  (e) => {
-    if (!potentialDragEl) return;
-    const dx = Math.abs(e.clientX - mouseDownPos.x);
-    const dy = Math.abs(e.clientY - mouseDownPos.y);
-    if ((dx > 8 || dy > 8) && !dragState.isDragging) {
-      dragState.isDragging = true;
-      dragState.sourceSelector = buildTarget(potentialDragEl);
+document.addEventListener("mouseup", (e) => {
+  if (dragState.isDragging) {
+    const target = document.elementFromPoint(e.clientX, e.clientY);
+    if (target && target !== potentialDragEl) {
+      recordStep("drag_and_drop", null, { source: dragState.sourceSelector, target: buildTarget(target) });
     }
-  },
-  true,
-);
-
-document.addEventListener(
-  "mouseup",
-  (e) => {
-    if (dragState.isDragging) {
-      const target = document.elementFromPoint(e.clientX, e.clientY);
-      if (target && target !== potentialDragEl) {
-        recordStep("drag_and_drop", null, {
-          source: dragState.sourceSelector,
-          target: buildTarget(target),
-        });
-      }
-    }
-    dragState.isDragging = false;
-    potentialDragEl = null;
-  },
-  true,
-);
+  }
+  dragState.isDragging = false;
+  potentialDragEl = null;
+}, true);
 
 // ─── Attach / Detach ──────────────────────────────────────────────────────────
 
@@ -272,10 +218,21 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     sendResponse({ ok: true, steps: SESSION.steps });
   }
   if (msg.type === "GET_STATUS") {
-    sendResponse({
-      isRecording: SESSION.isRecording,
-      stepCount: SESSION.steps.length,
-    });
+    sendResponse({ isRecording: SESSION.isRecording, stepCount: SESSION.steps.length });
   }
   return true;
+});
+
+// ─── Auto-start on new tabs ───────────────────────────────────────────────────
+// When a new tab opens inside a recording session (fresh or profile)
+// the content script loads fresh and needs to auto-attach listeners
+
+chrome.storage.local.get(["isRecording", "workflowId"], (data) => {
+  if (data.isRecording && data.workflowId) {
+    SESSION.isRecording = true;
+    SESSION.startTime = Date.now();
+    SESSION.steps = [];
+    attachListeners();
+    console.log("TraceDeck: Auto-started recording on tab:", location.href);
+  }
 });

@@ -3,8 +3,17 @@
   "name": "TraceDeck Recorder",
   "version": "1.0.0",
   "description": "Record browser workflows for TraceDeck",
-  "permissions": ["activeTab", "tabs", "storage", "scripting"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "scripting",
+    "windows",
+    "system.display"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "background.js"
   },

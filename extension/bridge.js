@@ -1,4 +1,4 @@
-// bridge.js — listens for recording triggers from TraceDeck dashboard
+// bridge.js — runs on TraceDeck pages
 
 let isRecording = false;
 let capturedSteps = [];
@@ -7,31 +7,46 @@ window.addEventListener("tracedeck_start", () => {
   const data = localStorage.getItem("tracedeck_workflow");
   if (!data) return;
   const workflow = JSON.parse(data);
+  const sessionMode = workflow.sessionType || "fresh";
+
   isRecording = true;
   capturedSteps = [];
 
-  chrome.storage.local.set({
+  chrome.runtime.sendMessage({
+    type: "OPEN_RECORDING_SESSION",
     workflowId: workflow.workflowId,
     workflowTitle: workflow.workflowTitle,
-    workflowFramework: workflow.workflowFramework,
-    isRecording: true,
-  });
-
-  chrome.runtime.sendMessage({
-    type: "START_WORKFLOW",
-    workflowId: workflow.workflowId,
+    sessionMode: sessionMode,
+  }, (response) => {
+    if (response?.ok) {
+      console.log("Recording session opened:", sessionMode);
+    } else {
+      console.error("Failed to open session:", response?.error);
+    }
   });
 });
 
 window.addEventListener("tracedeck_stop", () => {
   isRecording = false;
   localStorage.setItem("tracedeck_steps", JSON.stringify(capturedSteps));
-  chrome.runtime.sendMessage({ type: "STOP_WORKFLOW", steps: capturedSteps });
+
+  chrome.runtime.sendMessage({
+    type: "STOP_RECORDING_SESSION",
+    steps: capturedSteps,
+  });
 });
 
-// Listen for steps from content script via background
+// Receive step updates from background
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type === "STEP_UPDATE" && isRecording) {
+  if (msg.type === "STEP_UPDATE") {
     capturedSteps = msg.steps || [];
+    localStorage.setItem("tracedeck_steps", JSON.stringify(capturedSteps));
+    window.dispatchEvent(new CustomEvent("tracedeck_step_update", {
+      detail: {
+        steps: msg.steps,
+        lastStep: msg.lastStep,
+        stepCount: msg.stepCount,
+      }
+    }));
   }
 });

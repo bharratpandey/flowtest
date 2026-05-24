@@ -1,12 +1,12 @@
 // background.js - Service worker
-// Manages workflow lifecycle and sends steps to TraceDeck API
 
 const API_BASE = "http://localhost:3000/api";
 let activeWorkflowId = null;
 let stepBuffer = [];
 let flushTimer = null;
-let lastClickTime = {};      // tabId -> timestamp of last click
-let lastClickStep = {};      // tabId -> last click step
+let lastClickTime = {};
+let lastClickStep = {};
+let recordingWindowId = null;
 
 async function flushSteps() {
   if (!activeWorkflowId || stepBuffer.length === 0) return;
@@ -22,18 +22,106 @@ async function flushSteps() {
   }
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+function forwardStepUpdate(step) {
+  chrome.tabs.query({ url: "http://localhost:3000/*" }, (tabs) => {
+    tabs.forEach(tab => {
+      chrome.tabs.sendMessage(tab.id, {
+        type: "STEP_UPDATE",
+        steps: [...stepBuffer],
+        lastStep: step,
+        stepCount: stepBuffer.length,
+      }).catch(() => {});
+    });
+  });
+}
 
-  if (msg.type === "START_WORKFLOW") {
-    activeWorkflowId = msg.workflowId;
-    stepBuffer = [];
-    lastClickTime = {};
-    lastClickStep = {};
-    fetch(API_BASE + "/workflows/" + msg.workflowId + "/start-recording", {
+async function openRecordingSession(workflowId, sessionMode) {
+  activeWorkflowId = workflowId;
+  stepBuffer = [];
+  lastClickTime = {};
+  lastClickStep = {};
+
+  // Notify API that recording started
+  fetch(API_BASE + "/workflows/" + workflowId + "/start-recording", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  }).catch(console.error);
+
+  await chrome.storage.local.set({
+    isRecording: true,
+    workflowId,
+    stepCount: 0,
+  });
+
+  if (sessionMode === "fresh") {
+    // Open new incognito window — clean slate
+    const newWindow = await chrome.windows.create({
+      incognito: true,
+      url: "about:blank",
+      state: "maximized",
+      focused: true,
+    });
+    recordingWindowId = newWindow.id;
+    return { ok: true, mode: "fresh", windowId: newWindow.id };
+  } else {
+    // Profile mode — record in existing browser
+    // Just activate the current window and start recording
+    recordingWindowId = null;
+    const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (currentTab?.windowId) {
+      await chrome.windows.update(currentTab.windowId, { focused: true });
+    }
+    return { ok: true, mode: "profile" };
+  }
+}
+
+async function stopRecordingSession(steps) {
+  clearTimeout(flushTimer);
+
+  const finalSteps = steps?.length > 0 ? steps : stepBuffer;
+
+  if (activeWorkflowId) {
+    await fetch(API_BASE + "/workflows/" + activeWorkflowId + "/stop-recording", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ steps: finalSteps }),
     }).catch(console.error);
-    sendResponse({ ok: true });
+  }
+
+  // Close recording window if it was a fresh session
+  if (recordingWindowId) {
+    try {
+      await chrome.windows.remove(recordingWindowId);
+    } catch (e) {}
+    recordingWindowId = null;
+  }
+
+  activeWorkflowId = null;
+  stepBuffer = [];
+
+  await chrome.storage.local.set({
+    isRecording: false,
+    stepCount: 0,
+    lastStep: null,
+  });
+}
+
+// ─── Message handler ──────────────────────────────────────────────────────────
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+
+  if (msg.type === "OPEN_RECORDING_SESSION") {
+    openRecordingSession(msg.workflowId, msg.sessionMode)
+      .then(result => sendResponse(result))
+      .catch(err => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === "STOP_RECORDING_SESSION") {
+    stopRecordingSession(msg.steps)
+      .then(() => sendResponse({ ok: true }))
+      .catch(err => sendResponse({ ok: false, error: err.message }));
+    return true;
   }
 
   if (msg.type === "STEP_RECORDED") {
@@ -41,28 +129,26 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     const step = msg.step;
     const tabId = _sender?.tab?.id;
 
-    // Track click time per tab
     if (step.type === "click" || step.type === "dblclick") {
       lastClickTime[tabId] = Date.now();
       lastClickStep[tabId] = step;
     }
 
     stepBuffer.push(step);
-
-    // Forward to TraceDeck dashboard tabs
-    chrome.tabs.query({ url: "http://localhost:3000/*" }, (tabs) => {
-      tabs.forEach(tab => {
-        chrome.tabs.sendMessage(tab.id, {
-          type: "STEP_UPDATE",
-          steps: [...stepBuffer],
-          lastStep: step,
-          stepCount: stepBuffer.length,
-        }).catch(() => {});
-      });
-    });
+    forwardStepUpdate(step);
 
     clearTimeout(flushTimer);
     flushTimer = setTimeout(flushSteps, 2000);
+  }
+
+  if (msg.type === "START_WORKFLOW") {
+    activeWorkflowId = msg.workflowId;
+    stepBuffer = [];
+    fetch(API_BASE + "/workflows/" + msg.workflowId + "/start-recording", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }).catch(console.error);
+    sendResponse({ ok: true });
   }
 
   if (msg.type === "STOP_WORKFLOW") {
@@ -80,26 +166,30 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === "GET_STATE") {
-    sendResponse({ activeWorkflowId, stepCount: stepBuffer.length });
+    sendResponse({
+      activeWorkflowId,
+      stepCount: stepBuffer.length,
+      recordingWindowId,
+    });
   }
 
 });
 
-// Track tab navigation - smart deduplication
+// ─── Tab navigation tracking ──────────────────────────────────────────────────
+
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!activeWorkflowId) return;
   if (changeInfo.status !== "complete") return;
-  if (!tab.url || tab.url.startsWith("chrome://")) return;
+  if (!tab.url || tab.url.startsWith("chrome://") || tab.url === "about:blank") return;
   if (tab.url.startsWith("http://localhost:3000")) return;
+
+  // For fresh session — only track the recording window
+  if (recordingWindowId && tab.windowId !== recordingWindowId) return;
 
   const now = Date.now();
   const timeSinceClick = now - (lastClickTime[tabId] || 0);
 
-  // If a click happened within 1500ms on this tab
-  // the navigate was caused by the click — skip recording duplicate navigate
   if (timeSinceClick < 1500 && lastClickStep[tabId]) {
-    console.log("Skipping duplicate navigate after click:", tab.url);
-    // Update the click step's url to reflect where it navigated to
     const clickStep = lastClickStep[tabId];
     const idx = stepBuffer.findIndex(s => s === clickStep);
     if (idx !== -1) {
@@ -113,25 +203,24 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     return;
   }
 
-  // Pure navigation (typed URL, back/forward, redirect)
-  stepBuffer.push({
+  // Pure navigation
+  const navStep = {
     sequence: stepBuffer.length + 1,
     type: "navigate",
     url: tab.url,
     page_title: tab.title,
     timestamp_ms: now,
     target: null,
-  });
+  };
 
-  // Forward update
-  chrome.tabs.query({ url: "http://localhost:3000/*" }, (tabs) => {
-    tabs.forEach(t => {
-      chrome.tabs.sendMessage(t.id, {
-        type: "STEP_UPDATE",
-        steps: [...stepBuffer],
-        lastStep: stepBuffer[stepBuffer.length - 1],
-        stepCount: stepBuffer.length,
-      }).catch(() => {});
-    });
-  });
+  stepBuffer.push(navStep);
+  forwardStepUpdate(navStep);
+});
+
+// Handle recording window closed manually
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (windowId === recordingWindowId) {
+    recordingWindowId = null;
+    stopRecordingSession([]);
+  }
 });

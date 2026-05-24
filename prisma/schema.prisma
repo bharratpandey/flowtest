@@ -21,6 +21,7 @@ model User {
   healthChecks  HealthCheck[]
   accounts      Account[]
   sessions      Session[]
+  secrets   Secret[]
 }
 
 // ─── Workflows ────────────────────────────────────────────────────────────────
@@ -45,6 +46,7 @@ model Workflow {
   stakeholders  Stakeholder[]
   versions      WorkflowVersion[]
   logs          Log[]
+  secrets       Secret[]
 }
 
 // ─── Workflow Versions ────────────────────────────────────────────────────────
@@ -267,4 +269,20 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+model Secret {
+  id         String   @id @default(cuid())
+  userId     String
+  workflowId String?
+  name       String
+  hint       String?
+  value      String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workflow Workflow? @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, name])
 }
